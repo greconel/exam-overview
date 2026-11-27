@@ -49,7 +49,7 @@ export const COURSES = [
     sections: [
       {
         title: "Modules",
-        modules: range(10).map((n) => ({ id: `m${n}`, num: String(n), title: `Module ${n}`, editable: true })),
+        modules: range(10).map((n) => ({ id: `m${n}`, num: String(n), title: `Module ${n}` })),
       },
     ],
   },
@@ -81,8 +81,8 @@ export const COURSES = [
       },
       {
         title: "Programmeren · theorie en oefeningen",
-        hint: "Voorlopige namen — klik op het potloodje om een sessie te hernoemen.",
-        modules: range(10).map((n) => ({ id: `prog${n}`, num: `S${n}`, title: `Sessie ${n}`, editable: true })),
+        hint: "Klik op het potloodje om de naam van een module of hoofdstuk te wijzigen.",
+        modules: range(10).map((n) => ({ id: `prog${n}`, num: `S${n}`, title: `Sessie ${n}` })),
       },
     ],
   },

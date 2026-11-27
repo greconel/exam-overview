@@ -408,7 +408,7 @@ function viewCourse(c) {
                   ${
                     editing === lk
                       ? `<input class="rename" data-rename="${lk}" value="${esc(title)}" maxlength="120" aria-label="Nieuwe naam" />`
-                      : `<h4>${esc(title)}${m.editable ? `<button class="pen" data-edit="${lk}" aria-label="Naam wijzigen" title="Naam wijzigen">✎</button>` : ""}</h4>`
+                      : `<h4>${esc(title)}<button class="pen" data-edit="${lk}" aria-label="Naam wijzigen" title="Naam wijzigen">✎</button></h4>`
                   }
                   ${m.desc ? `<p class="desc">${esc(m.desc)}</p>` : ""}
                   <div class="parts">
