@@ -9,6 +9,8 @@ let tasks = [];
 let pending = {};
 let tab = "overzicht";
 let editing = null; // key being renamed
+let editingPages = null;
+let addingSection = null;
 
 try {
   const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
@@ -49,11 +51,32 @@ const isOn = (key) => progress[key] === "1";
 const partKey = (c, m, p) => `p:${c.id}:${m.id}:${p.id}`;
 const begripKey = (c, m) => `b:${c.id}:${m.id}`;
 const labelKey = (c, m) => `l:${c.id}:${m.id}`;
+const moduleRecordKey = (c, id) => `module:${c.id}:${id}`;
+const removedModuleKey = (c, id) => `removed:${c.id}:${id}`;
+const pagesKey = (c, m) => `pages:${c.id}:${m.id}`;
 const titleOf = (c, m) => progress[labelKey(c, m)] || m.title;
+const pageCountOf = (c, m) => Number(progress[pagesKey(c, m)] || m.pages) || 0;
 
-// flat list of modules with the parts that apply to them
+const sectionsOf = (c) =>
+  c.sections.map((section, sectionIndex) => {
+    const defaults = section.modules.filter((m) => progress[removedModuleKey(c, m.id)] !== "1");
+    const prefix = `module:${c.id}:`;
+    const added = Object.entries(progress).flatMap(([key, value]) => {
+      if (!key.startsWith(prefix)) return [];
+      try {
+        const record = JSON.parse(value);
+        if (!record || record.section !== sectionIndex || typeof record.title !== "string" || typeof record.num !== "string") return [];
+        return [{ id: key.slice(prefix.length), ...record, custom: true }];
+      } catch (error) {
+        console.error(`Ongeldige opgeslagen module: ${key}`, error);
+        return [];
+      }
+    });
+    return { ...section, modules: [...defaults, ...added] };
+  });
+
 const modulesOf = (c) =>
-  c.sections.flatMap((s) => s.modules.map((m) => ({ ...m, parts: s.parts || c.parts })));
+  sectionsOf(c).flatMap((s) => s.modules.map((m) => ({ ...m, parts: s.parts || c.parts })));
 
 const statusOf = (c, m) => {
   const done = m.parts.filter((p) => isOn(partKey(c, m, p))).length;
@@ -130,14 +153,18 @@ async function flush() {
   }
 }
 
-function setKey(key, value) {
-  if (value === null) delete progress[key];
-  else progress[key] = value;
-  pending[key] = value;
+function setKeys(changes) {
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === null) delete progress[key];
+    else progress[key] = value;
+    pending[key] = value;
+  }
   persistCache();
   render();
   flush();
 }
+
+const setKey = (key, value) => setKeys({ [key]: value });
 
 async function load() {
   try {
@@ -386,14 +413,27 @@ function viewCourse(c) {
     <div class="bar big"><i style="width:${p}%"></i></div>
   </section>
 
-  ${c.sections
+  ${sectionsOf(c)
     .map((sec, si) => {
       const parts = sec.parts || c.parts;
       return `<section class="card section" style="--c:${c.color};--i:${si}">
         <header class="sec-head">
-          <h3>${esc(sec.title)}</h3>
-          ${sec.hint ? `<p class="hint">${esc(sec.hint)}</p>` : ""}
+          <div>
+            <h3>${esc(sec.title)}</h3>
+            ${sec.hint ? `<p class="hint">${esc(sec.hint)}</p>` : ""}
+          </div>
+          <button class="add-module" data-add-module="${c.id}:${si}">+ Toevoegen</button>
         </header>
+        ${
+          addingSection === `${c.id}:${si}`
+            ? `<form class="module-form" data-module-form="${c.id}:${si}">
+                <input name="title" placeholder="Naam van module of hoofdstuk" maxlength="120" required autocomplete="off" />
+                <input name="pages" type="number" min="1" max="10000" step="1" placeholder="Pagina's" aria-label="Aantal pagina's (optioneel)" />
+                <button type="submit">Toevoegen</button>
+                <button type="button" class="cancel-module" data-cancel-module>Annuleren</button>
+              </form>`
+            : ""
+        }
         <ol class="modules">
           ${sec.modules
             .map((m0) => {
@@ -401,15 +441,28 @@ function viewCourse(c) {
               const st = statusOf(c, m);
               const bk = begripKey(c, m);
               const lk = labelKey(c, m);
+              const pk = pagesKey(c, m);
               const title = titleOf(c, m);
+              const pageCount = pageCountOf(c, m);
               return `<li class="module st-${st}">
                 <span class="num">${esc(m.num)}</span>
                 <div class="m-main">
-                  ${
-                    editing === lk
-                      ? `<input class="rename" data-rename="${lk}" value="${esc(title)}" maxlength="120" aria-label="Nieuwe naam" />`
-                      : `<h4>${esc(title)}<button class="pen" data-edit="${lk}" aria-label="Naam wijzigen" title="Naam wijzigen">✎</button></h4>`
-                  }
+                  <div class="module-title-row">
+                    ${
+                      editing === lk
+                        ? `<input class="rename" data-rename="${lk}" value="${esc(title)}" maxlength="120" aria-label="Nieuwe naam" />`
+                        : `<h4>${esc(title)}<button class="pen" data-edit="${lk}" aria-label="Naam wijzigen" title="Naam wijzigen">✎</button></h4>`
+                    }
+                    <button class="module-remove" data-remove-module="${c.id}:${m.id}" aria-label="Module verwijderen" title="Module verwijderen">×</button>
+                  </div>
+                  <div class="module-pages">
+                    ${
+                      editingPages === pk
+                        ? `<input class="page-rename" data-page-rename="${pk}" type="number" min="1" max="10000" step="1" value="${pageCount || ""}" aria-label="Aantal pagina's" />`
+                        : pageCount ? `<small>${pageCount} p.</small>` : ""
+                    }
+                    <button class="page-edit" data-edit-pages="${pk}" aria-label="${pageCount ? "Aantal pagina's wijzigen" : "Pagina's toevoegen"}" title="${pageCount ? "Aantal pagina's wijzigen" : "Pagina's toevoegen"}">✎</button>
+                  </div>
                   ${m.desc ? `<p class="desc">${esc(m.desc)}</p>` : ""}
                   <div class="parts">
                     ${parts
@@ -451,7 +504,7 @@ function render(animate = false) {
     void view.offsetWidth;
     view.classList.add("enter");
   }
-  const input = view.querySelector(".rename");
+  const input = view.querySelector(".rename, .page-rename, .module-form input[name='title']");
   if (input) {
     input.focus();
     input.select();
@@ -462,6 +515,8 @@ function go(id) {
   if (id === tab) return;
   tab = id;
   editing = null;
+  editingPages = null;
+  addingSection = null;
   history.replaceState(null, "", `#${id}`);
   render(true);
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -473,6 +528,31 @@ document.addEventListener("click", async (e) => {
   if (!t) return;
 
   if (t.dataset.tab) return go(t.dataset.tab);
+
+  if (t.dataset.addModule) {
+    addingSection = t.dataset.addModule;
+    return render();
+  }
+
+  if (t.dataset.cancelModule !== undefined) {
+    addingSection = null;
+    return render();
+  }
+
+  if (t.dataset.editPages) {
+    editingPages = t.dataset.editPages;
+    return render();
+  }
+
+  if (t.dataset.removeModule) {
+    const [courseId, moduleId] = t.dataset.removeModule.split(":");
+    const c = course(courseId);
+    const m = c && modulesOf(c).find((item) => item.id === moduleId);
+    if (c && m && window.confirm(`Verwijder "${titleOf(c, m)}" en de bijbehorende voortgang?`)) {
+      removeModule(c, m);
+    }
+    return;
+  }
 
   if (t.dataset.toggle) return setKey(t.dataset.toggle, isOn(t.dataset.toggle) ? null : "1");
 
@@ -522,6 +602,13 @@ document.addEventListener("click", async (e) => {
 });
 
 document.addEventListener("submit", async (e) => {
+  const moduleForm = e.target.closest?.("[data-module-form]");
+  if (moduleForm) {
+    e.preventDefault();
+    addModule(moduleForm);
+    return;
+  }
+
   if (e.target.id !== "task-form") return;
   e.preventDefault();
   const form = e.target;
@@ -552,8 +639,85 @@ const commitRename = (input) => {
   if (val === current) return render();
   setKey(key, val || null);
 };
+const commitPages = (input) => {
+  const key = input.dataset.pageRename;
+  const value = input.value.trim();
+  if (value && (!Number.isInteger(Number(value)) || Number(value) < 1 || Number(value) > 10000)) {
+    input.focus();
+    toast("Vul een aantal pagina's tussen 1 en 10000 in.");
+    return;
+  }
+  editingPages = null;
+  const current = progress[key] || "";
+  const normalized = value ? String(Number(value)) : "";
+  if (normalized === current) return render();
+  setKey(key, normalized || null);
+};
+
+function addModule(form) {
+  const [courseId, sectionValue] = form.dataset.moduleForm.split(":");
+  const c = course(courseId);
+  const sectionIndex = Number(sectionValue);
+  const title = form.elements.title.value.trim();
+  const pageValue = form.elements.pages.value.trim();
+  const pageCount = pageValue ? Number(pageValue) : null;
+  if (!c || !Number.isInteger(sectionIndex) || !sectionsOf(c)[sectionIndex] || !title) return;
+  if (pageValue && (!Number.isInteger(pageCount) || pageCount < 1 || pageCount > 10000)) {
+    toast("Vul een aantal pagina's tussen 1 en 10000 in.");
+    return;
+  }
+
+  const sectionModules = sectionsOf(c)[sectionIndex].modules;
+  const lastNum = String(sectionModules.at(-1)?.num || "");
+  const match = lastNum.match(/^(.*?)(\d+)$/);
+  const prefix = match?.[1] || "";
+  const matchingNumbers = modulesOf(c)
+    .map((m) => String(m.num).match(/^(.*?)(\d+)$/))
+    .filter((numberMatch) => numberMatch?.[1] === prefix);
+  const nextNumber = Math.max(0, ...matchingNumbers.map((numberMatch) => Number(numberMatch[2]))) + 1;
+  const timestamp = Date.now().toString(36);
+  let suffix = 0;
+  let id = `u${timestamp}`;
+  while (progress[moduleRecordKey(c, id)]) id = `u${timestamp}${++suffix}`;
+  const record = JSON.stringify({ section: sectionIndex, num: `${prefix}${nextNumber}`, title });
+  if (record.length > 200) {
+    toast("De modulegegevens zijn te lang om op te slaan.");
+    return;
+  }
+
+  const changes = { [moduleRecordKey(c, id)]: record };
+  if (pageCount !== null) changes[pagesKey(c, { id })] = String(pageCount);
+  addingSection = null;
+  setKeys(changes);
+}
+
+function removeModule(c, m) {
+  const changes = {
+    [m.custom ? moduleRecordKey(c, m.id) : removedModuleKey(c, m.id)]: m.custom ? null : "1",
+    [labelKey(c, m)]: null,
+    [pagesKey(c, m)]: null,
+    [begripKey(c, m)]: null,
+  };
+  for (const part of m.parts) changes[partKey(c, m, part)] = null;
+  for (const goal of GOALS.filter((item) => item.course === c.id)) {
+    for (const column of goal.columns) changes[column.key(m)] = null;
+  }
+  editing = null;
+  editingPages = null;
+  setKeys(changes);
+}
+
 document.addEventListener("keydown", (e) => {
   const input = e.target.closest?.(".rename");
+  const pageInput = e.target.closest?.(".page-rename");
+  if (pageInput) {
+    if (e.key === "Enter") commitPages(pageInput);
+    if (e.key === "Escape") {
+      editingPages = null;
+      render();
+    }
+    return;
+  }
   if (!input) return;
   if (e.key === "Enter") commitRename(input);
   if (e.key === "Escape") {
@@ -565,12 +729,13 @@ document.addEventListener(
   "blur",
   (e) => {
     if (e.target.classList?.contains("rename") && editing) commitRename(e.target);
+    if (e.target.classList?.contains("page-rename") && editingPages) commitPages(e.target);
   },
   true
 );
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && !editing) load();
+  if (document.visibilityState === "visible" && !editing && !editingPages) load();
 });
 window.addEventListener("online", () => flush());
 
